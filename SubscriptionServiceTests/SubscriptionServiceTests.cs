@@ -60,17 +60,27 @@ namespace SubscriptionServiceTests
             _repo.Setup(x => x.GetById(1)).Returns(member);
             _payment.Setup(x => x.VerifyPayment(1, paymentAmount)).Returns(true);
 
-            // Act
+            var beforeRenewal = DateTime.Now;
+
+            // Act        
             var result = _service.RenewSubscription(1, paymentAmount, days);
+
+            var afterRenewal = DateTime.Now;
 
             // Assert
             Assert.True(result);
-            Assert.NotEqual(oldDate, member.SubscriptionEnd);
+            Assert.NotEqual(oldDate, member.SubscriptionEnd); 
+            Assert.InRange(
+                member.SubscriptionEnd!.Value, 
+                beforeRenewal.AddDays(days), 
+                afterRenewal.AddDays(days)
+            );
+
             _repo.Verify(x => x.Update(It.Is<Member>(m => m.IsActive == true)), Times.Exactly(1));
             _notify.Verify(x => x.SendNotification("Subscription renewed!", 1));
         }
 
-        /// <summary>Гнучкість перевірок викликів: Деактивація лише прострочених акаунтів.</summary>
+        /// <summary>Перевірка порожності та колекції: Деактивація лише прострочених акаунтів (з перехопленням результату).</summary>
         [Fact]
         public void DeactivateExpiredMembers_OnlyDeactivatesExpiredOnes()
         {
@@ -81,15 +91,25 @@ namespace SubscriptionServiceTests
 
             _repo.Setup(x => x.GetAll()).Returns(membersList);
 
+            var updatedMembers = new List<Member>();
+            _repo.Setup(x => x.Update(It.IsAny<Member>()))
+                 .Callback<Member>(m => updatedMembers.Add(m));
+
             // Act
             _service.DeactivateExpiredMembers();
 
             // Assert
-            Assert.NotEmpty(membersList);
-            Assert.Contains(expiredMember, membersList);
-            _repo.Verify(x => x.GetAll(), Times.AtLeastOnce);
-            _repo.Verify(x => x.Update(It.Is<Member>(m => m.Id == 1 && m.IsActive == false)), Times.Once);
+            Assert.NotEmpty(updatedMembers); 
+            Assert.Contains(expiredMember, updatedMembers); 
+            Assert.False(expiredMember.IsActive);
+            Assert.True(activeMember.IsActive);
+            
+            _repo.Verify(x => x.GetAll(), Times.Once);
+            _repo.Verify(x => x.Update(It.Is<Member>(m => m.Id == 1)), Times.Once);
             _repo.Verify(x => x.Update(It.Is<Member>(m => m.Id == 2)), Times.Never);
+
+            _notify.Verify(x => x.SendNotification("Membership expired", 1), Times.Once);
+            _notify.Verify(x => x.SendNotification(It.IsAny<string>(), 2), Times.Never);
         }
 
         /// <summary>Перевірка на null: акаунти з безлімітною підпискою (SubscriptionEnd = null) не блокуються.</summary>
@@ -106,6 +126,7 @@ namespace SubscriptionServiceTests
             _service.DeactivateExpiredMembers();
 
             // Assert
+            Assert.True(lifetimeMember.IsActive); 
             _repo.Verify(x => x.Update(It.Is<Member>(m => m.Id == 3)), Times.Never);
         }
 
@@ -117,11 +138,15 @@ namespace SubscriptionServiceTests
             var emptyMembersList = new List<Member>();
             _repo.Setup(x => x.GetAll()).Returns(emptyMembersList);
 
+            var updatedMembers = new List<Member>();
+            _repo.Setup(x => x.Update(It.IsAny<Member>()))
+                 .Callback<Member>(m => updatedMembers.Add(m));
+
             // Act
             _service.DeactivateExpiredMembers();
 
             // Assert
-            Assert.Empty(emptyMembersList);
+            Assert.Empty(updatedMembers); // Безпосередньо перевіряємо, що нікого не передали на оновлення
             _repo.Verify(x => x.GetAll(), Times.Once);
             _repo.Verify(x => x.Update(It.IsAny<Member>()), Times.Never);
         }

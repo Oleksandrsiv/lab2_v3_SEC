@@ -56,7 +56,7 @@ namespace SubscriptionServiceTests
 
             // Act
             var isActive = _service.IsActive(2);
-
+            
             // Assert
             Assert.True(isActive);
         }
